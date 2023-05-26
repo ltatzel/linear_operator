@@ -16,9 +16,7 @@ from .linear_solver import LinearSolver, LinearSolverState, LinearSystem
 
 
 class PLS_GPC(LinearSolver):
-    """
-    Probabilistic linear solver specifically designed for GP classification.
-    """
+    """Probabilistic linear solver specifically designed for GP classification."""
 
     def __init__(
         self,
@@ -37,15 +35,15 @@ class PLS_GPC(LinearSolver):
         K_op: LinearOperator,
         Winv_op: LinearOperator,
         rhs: Tensor,
+        *,  # enforce keyword arguments in the following
         x: Optional[Tensor] = None,
-        K_op_actions: Optional[Tensor] = None,
-        actions: Optional[Tensor] = None,
+        actions: Optional[Tensor] = None,  # N x i tensor
+        K_op_actions: Optional[Tensor] = None,  # N x i tensor
     ) -> Generator[LinearSolverState, None, None]:
-        r"""
-        Generator implementing the linear solver iteration.
+        r"""Generator implementing the linear solver iteration.
 
-        This function allows stepping through the solver iteration one step at a
-        time and thus exposes internal quantities in the solver state cache.
+        This function allows stepping through the solver iteration one step at a time
+        and thus exposes internal quantities in the solver state cache.
         """
 
         # Convert to linear operator
@@ -63,17 +61,16 @@ class PLS_GPC(LinearSolver):
         if x is not None:
             x = x.reshape(-1)
 
-        # There are three cases: (1) `K_op_actions` and `actions` are given.
-        # Then, we construct `inverse_op` and compute a consistent initial
-        # solution (i.e. `x` can not be used and must be `None`). If this is not
-        # the case, we dont' use preconditioning. In this case, we have to
-        # distinguish two sub-cases: (2) `x` is not given and (3) `x` is given.
-        # These two cases were already implemented in `PLS` and are thus copied.
-        if (K_op_actions is not None) and (actions is not None):  # case (1)
-            print("[PLS_GPC] Case 1: Preconditioning")
-
-            # Make sure `x` is None
+        # There are three cases: (1) `actions` and `K_op_actions` are given. Then, we
+        # construct `inverse_op` and compute a consistent initial solution (i.e. `x` can
+        # not be used and must be `None`). If this is not the case, we dont' use
+        # preconditioning. In this case, we have to distinguish two sub-cases: (2) `x`
+        # is not given and (3) `x` is given. These two cases were already implemented in
+        # `PLS` and are thus copied.
+        if (actions is not None) and (K_op_actions is not None):  # case (1)
             assert x is None
+
+            print("[PLS_GPC] Case 1: Preconditioning")
 
             # Check dimensions of tensors
             assert K_op_actions.shape == actions.shape  # both: N x i
@@ -92,8 +89,12 @@ class PLS_GPC(LinearSolver):
             residual = (K_op + Winv_op) @ solution - rhs
 
         else:
+            assert (actions is None) and (K_op_actions is None)
+
             if x is None:  # case (2)
                 print("[PLS_GPC] Case 2: Setting `x` to zero")
+
+                # "Trivial" initialization
                 inverse_op = ZeroLinearOperator(
                     *K_op.shape, dtype=K_op.dtype, device=K_op.device
                 )
@@ -102,14 +103,14 @@ class PLS_GPC(LinearSolver):
 
             else:  # case (3)
                 print("[PLS_GPC] Case 3: Using given `x`")
+
                 # Construct a better initial guess with a consistent inverse
                 # approximation such that x = inverse_op @ rhs
                 action = x
                 linear_op_action = (K_op + Winv_op) @ action
                 action_linear_op_action = torch.inner(linear_op_action, action)
 
-                # Potentially improved initial guess x derived from initial
-                # guess
+                # Potentially improved initial guess x derived from initial guess
                 step_size = torch.inner(action, rhs) / action_linear_op_action
                 solution = step_size * action
 
@@ -139,6 +140,8 @@ class PLS_GPC(LinearSolver):
                 "observation": None,
                 "search_dir": None,
                 "step_size": None,
+                "actions": None,
+                "K_op_actions": None,
             },
         )
 
@@ -155,7 +158,12 @@ class PLS_GPC(LinearSolver):
 
             # Select action
             action = self.policy(solver_state)
-            linear_op_action = linear_op @ action
+
+            # Evaluate matrix-vector product with `K_op` seperately
+            K_op_action = K_op @ action
+
+            # Evaluate `(K_op + Winv_op) @ action`
+            linear_op_action = K_op_action + Winv_op @ action
 
             # Observation
             observ = torch.inner(action, solver_state.residual)
@@ -199,13 +207,10 @@ class PLS_GPC(LinearSolver):
                 )
 
             # Update residual
-            solver_state.residual = rhs - linear_op @ solver_state.solution
+            solver_state.residual = rhs - (K_op + Winv_op) @ solver_state.solution
             solver_state.residual_norm = torch.linalg.vector_norm(
                 solver_state.residual, ord=2
             )
-
-            # Update log-determinant
-            solver_state.logdet = solver_state.logdet + torch.log(search_dir_sqnorm)
 
             # Update iteration
             solver_state.iteration += 1
@@ -216,25 +221,23 @@ class PLS_GPC(LinearSolver):
             solver_state.cache["search_dir"] = search_dir
             solver_state.cache["step_size"] = step_size
 
+            # Append `action` to `actions`
+            if solver_state.cache["actions"] is None:
+                solver_state.cache["actions"] = action.reshape(-1, 1)
+            else:
+                solver_state.cache["actions"] = torch.hstack(
+                    (solver_state.cache["actions"], action.reshape(-1, 1))
+                )
+
+            # Append `K_op_action` to `K_op_actions`
+            if solver_state.cache["K_op_actions"] is None:
+                solver_state.cache["K_op_actions"] = K_op_action.reshape(-1, 1)
+            else:
+                solver_state.cache["K_op_actions"] = torch.hstack(
+                    (solver_state.cache["K_op_actions"], K_op_action.reshape(-1, 1))
+                )
+
             yield solver_state
 
-    def solve(
-        self,
-        linear_op: LinearOperator,
-        rhs: Tensor,
-        /,
-        x: Optional[Tensor] = None,
-    ) -> LinearSolverState:
-        r"""Solve linear system :math:`Ax_*=b`.
-
-        :param linear_op: Linear operator :math:`A`.
-        :param rhs: Right-hand-side :math:`b`.
-        :param x: Initial guess :math:`x \approx x_*`.
-        """
-
-        solver_state = None
-
-        for solver_state in self.solve_iterator(linear_op, rhs, x=x):
-            pass
-
-        return solver_state
+    def solve(self):
+        raise NotImplementedError()
