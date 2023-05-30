@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Generator, Optional
+from warnings import warn
 
 import torch
 from torch import Tensor
@@ -86,8 +87,7 @@ class PLS_GPC(LinearSolver):
 
             # Compute consistent solution and residual
             solution = inverse_op @ rhs
-            residual = (K_op + Winv_op) @ solution - rhs
-
+            residual = rhs - (K_op + Winv_op) @ solution
         else:
             assert (actions is None) and (K_op_actions is None)
 
@@ -184,6 +184,12 @@ class PLS_GPC(LinearSolver):
                         f"PLS terminated after {solver_state.iteration} iteration(s)"
                         + " due to a negative normalization constant."
                     )
+                warn_msg = f"""
+                PLS terminated after {solver_state.iteration} iteration(s) due to a
+                negative normalization constant. This can happen, e.g. when the current
+                action has already been used in the preconditioner.
+                """
+                warn(warn_msg)
                 break
 
             # Update solution estimate
