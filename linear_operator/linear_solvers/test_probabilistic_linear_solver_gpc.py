@@ -109,7 +109,6 @@ def test_preconditioner(seed, N, pls_policy, device):
 
     # Run preconditioner for `pre_iters` iterations
     pre_iters = N//2
-    print("pre_iters = ", pre_iters)
 
     # Construct preconditioner
     pre_solver_state = run_solver(pls_policy, pre_iters, K, Winv, rhs)
@@ -166,6 +165,12 @@ def test_initial_state_of_preconditioned_solver(seed, N, pls_policy, device):
 
     # Check consistency of solution, residual and inverse approximation
     check_consistency(solver_state)
+
+    # Check shape of actions after second run
+    num_actions_pre = pre_solver_state.iteration
+    num_actions = solver_state.iteration
+    assert solver_state.cache["actions"].shape[1] == num_actions_pre + num_actions
+    assert solver_state.cache["K_op_actions"].shape[1] == num_actions_pre + num_actions
 
 
 @pytest.mark.parametrize("seed", SEEDS, ids=SEEDS_IDS)

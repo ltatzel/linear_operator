@@ -71,14 +71,12 @@ class PLS_GPC(LinearSolver):
         if (actions is not None) and (K_op_actions is not None):  # case (1)
             assert x is None
 
-            print("[PLS_GPC] Case 1: Preconditioning")
-
             # Check dimensions of tensors
             assert K_op_actions.shape == actions.shape  # both: N x i
             assert K_op_actions.shape[0] == K_op.shape[0]
 
             # Compute `M`
-            M = actions.T @ K_op_actions + actions.T @ Winv_op @ actions
+            M = actions.T @ K_op_actions + actions.T @ (Winv_op @ actions)
 
             # Compute its inverse via SVD (`M` is spd)
             Lambda_diag, U = torch.linalg.eigh(M)
@@ -92,8 +90,6 @@ class PLS_GPC(LinearSolver):
             assert (actions is None) and (K_op_actions is None)
 
             if x is None:  # case (2)
-                print("[PLS_GPC] Case 2: Setting `x` to zero")
-
                 # "Trivial" initialization
                 inverse_op = ZeroLinearOperator(
                     *K_op.shape, dtype=K_op.dtype, device=K_op.device
@@ -102,8 +98,6 @@ class PLS_GPC(LinearSolver):
                 residual = rhs
 
             else:  # case (3)
-                print("[PLS_GPC] Case 3: Using given `x`")
-
                 # Construct a better initial guess with a consistent inverse
                 # approximation such that x = inverse_op @ rhs
                 action = x
@@ -140,8 +134,8 @@ class PLS_GPC(LinearSolver):
                 "observation": None,
                 "search_dir": None,
                 "step_size": None,
-                "actions": None,
-                "K_op_actions": None,
+                "actions": actions if actions is not None else None,
+                "K_op_actions": K_op_actions if K_op_actions is not None else None,
             },
         )
 
@@ -186,8 +180,7 @@ class PLS_GPC(LinearSolver):
                     )
                 warn_msg = f"""
                 PLS terminated after {solver_state.iteration} iteration(s) due to a
-                negative normalization constant. This can happen, e.g. when the current
-                action has already been used in the preconditioner.
+                negative normalization constant.
                 """
                 warn(warn_msg)
                 break
