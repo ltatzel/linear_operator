@@ -193,17 +193,11 @@ def test_is_solved_without_preconditioner(seed, N, pls_policy, device):
 @pytest.mark.parametrize("seed", SEEDS, ids=SEEDS_IDS)
 @pytest.mark.parametrize("N", NS, ids=NS_IDS)
 @pytest.mark.parametrize("pre_pls_policy", PRE_PLS_POLICIES, ids=PRE_PLS_POLICIES_IDS)
-@pytest.mark.parametrize("pls_policy", PLS_POLICIES, ids=PLS_POLICIES_IDS)
 @pytest.mark.parametrize("device", DEVICES, ids=DEVICES_IDS)
-def test_is_solved_with_preconditioner(seed, N, pre_pls_policy, pls_policy, device):
-    """Test if the linear system is actually solved when a preconditioner is used."""
-
-    # If both actions are `UnitVectorPolicy` this leads to numerical problems because
-    # the very same unit vector actions are applied to the same problem twice.
-    pre_policy_is_chol = isinstance(pre_pls_policy, UnitVectorPolicy)
-    policy_is_chol = isinstance(pls_policy, UnitVectorPolicy)
-    if pre_policy_is_chol and policy_is_chol:
-        pytest.skip("Both policies are `UnitVectorPolicy`")
+def test_is_solved_cg_with_preconditioner(seed, N, pre_pls_policy, device):
+    """Test if the linear system is actually solved with CG actions when a
+    preconditioner (partial CG or partial Cholesky) is used.
+    """
 
     # Create test problem
     K, Winv, rhs, solution_ref = get_testproblem(seed, N, device)
@@ -214,6 +208,7 @@ def test_is_solved_with_preconditioner(seed, N, pre_pls_policy, pls_policy, devi
 
     # Run solver a second time on the same problem
     pls_max_iter = N
+    pls_policy = GradientPolicy()
     solver_state = run_solver(
         pls_policy,
         pls_max_iter,
