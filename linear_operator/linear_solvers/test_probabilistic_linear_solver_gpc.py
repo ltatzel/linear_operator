@@ -46,6 +46,8 @@ def run_solver(
         x=None,
         actions=None,
         K_op_actions=None,
+        top_k=None,
+        kappa=None,
 ):
     """Run the `PLS_GPC` solver for `pls_max_iter` iterations. Return the final solver
     state.
@@ -60,7 +62,9 @@ def run_solver(
             rhs,
             x=x,
             actions=actions,
-            K_op_actions=K_op_actions
+            K_op_actions=K_op_actions,
+            top_k=top_k,
+            kappa=kappa,
         )
         for solver_state in solve_iterator:
             pass
@@ -69,12 +73,17 @@ def run_solver(
 
 
 def check_consistency(solver_state):
-    """Test the consistency of solution, residual and inverse approximation."""
+    """Test the consistency of solution, residual, inverse approximation and actions."""
     lin_op = solver_state.problem.A
     rhs = solver_state.problem.b
     solution = solver_state.solution
     assert allclose(solution, solver_state.inverse_op @ rhs)
     assert allclose(rhs - lin_op @ solution, solver_state.residual)
+
+    if solver_state.cache["actions"] is not None:
+        S_i = solver_state.cache["actions"]
+    C_i = S_i @ torch.linalg.solve(S_i.T @ lin_op @ S_i, S_i.T)
+    assert torch.allclose(C_i, solver_state.inverse_op.to_dense(), atol=1e-6)
 
 
 # Define test cases
@@ -94,6 +103,12 @@ PLS_POLICIES_IDS = ["Policy = CG", "Policy = Cholesky"]
 
 PRE_PLS_POLICIES = [GradientPolicy(), UnitVectorPolicy()]
 PRE_PLS_POLICIES_IDS = ["PrePolicy = CG", "PrePolicy = Cholesky"]
+
+TOP_K = [None, 3]
+TOP_K_IDS = [str(top_k) for top_k in TOP_K]
+
+KAPPAS = [None, 0.5]
+KAPPAS_IDS = [str(kappa) for kappa in KAPPAS]
 
 
 @pytest.mark.parametrize("seed", SEEDS, ids=SEEDS_IDS)
@@ -127,8 +142,12 @@ def test_preconditioner(seed, N, pls_policy, device):
 @pytest.mark.parametrize("seed", SEEDS, ids=SEEDS_IDS)
 @pytest.mark.parametrize("N", NS, ids=NS_IDS)
 @pytest.mark.parametrize("pls_policy", PLS_POLICIES, ids=PLS_POLICIES_IDS)
+@pytest.mark.parametrize("top_k", TOP_K, ids=TOP_K_IDS)
+@pytest.mark.parametrize("kappa", KAPPAS, ids=KAPPAS_IDS)
 @pytest.mark.parametrize("device", DEVICES, ids=DEVICES_IDS)
-def test_initial_state_of_preconditioned_solver(seed, N, pls_policy, device):
+def test_initial_state_of_preconditioned_solver(
+    seed, N, pls_policy, top_k, kappa, device
+):
     """Here, we test the initial state of the solver when a preconditioner (i.e.
     `actions` and `K_op_actions`) is used.
     """
@@ -151,26 +170,29 @@ def test_initial_state_of_preconditioned_solver(seed, N, pls_policy, device):
         rhs,
         actions=actions,
         K_op_actions=K_op_actions,
+        top_k=top_k,
+        kappa=kappa,
     )
 
-    # Construct root of C_i by hand and compare to the one in `solver_state`
-    eigenvals, U = torch.linalg.eigh(actions.T @ (K + Winv) @ actions)
-    root = actions @ U @ torch.diag(torch.sqrt(1 / eigenvals))
-    assert allclose(root, solver_state.inverse_op.root.to_dense())
-
-    # Construct C_i by hand and compare to the one in `solver_state`
-    inverse_op_inner = torch.linalg.inv(actions.T @ (K + Winv) @ actions)
-    inverse_op = actions @ inverse_op_inner @ actions.T
-    assert allclose(inverse_op, solver_state.inverse_op.to_dense())
-
-    # Check consistency of solution, residual and inverse approximation
+    # Check consistency of solution, residual, actions and inverse approximation
     check_consistency(solver_state)
 
-    # Check shape of actions after second run
-    num_actions_pre = pre_solver_state.iteration
-    num_actions = solver_state.iteration
-    assert solver_state.cache["actions"].shape[1] == num_actions_pre + num_actions
-    assert solver_state.cache["K_op_actions"].shape[1] == num_actions_pre + num_actions
+    if top_k is None and kappa is None:  # no compression
+        
+        # Construct root of C_i by hand and compare to the one in `solver_state`
+        eigenvals, U = torch.linalg.eigh(actions.T @ (K + Winv) @ actions)
+        root = actions @ U @ torch.diag(torch.sqrt(1 / eigenvals))
+        assert allclose(root, solver_state.inverse_op.root.to_dense())
+
+        # Construct C_i by hand and compare to the one in `solver_state`
+        inverse_op_inner = torch.linalg.inv(actions.T @ (K + Winv) @ actions)
+        inverse_op = actions @ inverse_op_inner @ actions.T
+        assert allclose(inverse_op, solver_state.inverse_op.to_dense())
+
+        # Check shape of actions after second run
+        num_actions_total = pre_solver_state.iteration + solver_state.iteration
+        assert solver_state.cache["actions"].shape[1] == num_actions_total
+        assert solver_state.cache["K_op_actions"].shape[1] == num_actions_total
 
 
 @pytest.mark.parametrize("seed", SEEDS, ids=SEEDS_IDS)
@@ -228,3 +250,9 @@ def test_is_solved_cg_with_preconditioner(seed, N, pre_pls_policy, device):
     # Check solution
     assert allclose(solver_state.solution, solution_ref)
     assert solver_state.iteration < N  # Preconditioning "helped"
+
+
+if __name__ == "__main__":
+    test_initial_state_of_preconditioned_solver(
+        seed=0, N=4, pls_policy=GradientPolicy(), top_k=2, kappa=None, device="cpu"
+    )

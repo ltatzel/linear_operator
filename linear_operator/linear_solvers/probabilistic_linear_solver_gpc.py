@@ -93,12 +93,18 @@ class PLS_GPC(LinearSolver):
             Lambda_diag, U = PLS_GPC.compression(
                 Lambda_diag, U, top_k=top_k, kappa=kappa
             )
-            Root = actions @ U @ torch.diag(torch.sqrt(1 / Lambda_diag))
+            actions_U = actions @ U
+            Root = actions_U @ torch.diag(torch.sqrt(1 / Lambda_diag))
             inverse_op = LowRankRootLinearOperator(Root)
 
             # Compute consistent solution and residual
             solution = inverse_op @ rhs
             residual = rhs - (K_op + Winv_op) @ solution
+
+            # Modify `actions` and `K_op_actions` for consistency with `inverse_op`
+            if top_k is not None or kappa is not None:
+                actions = actions_U
+                K_op_actions = K_op_actions @ U
 
         else:  # no preconditioning (cases 2 and 3)
             assert (actions is None) and (K_op_actions is None)
