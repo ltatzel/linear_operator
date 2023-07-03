@@ -70,7 +70,7 @@ def try_pls_gpc_with_compression(use_compression):
                 top_k=top_k,
             )
             for solver_state in solve_iterator:
-                print("  Iteration", solver_state.iteration)
+                print(f"  Iteration {solver_state.iteration}/{pls.max_iter}")
 
                 # Increase iterations counter
                 if solver_state.iteration != 0:
@@ -85,7 +85,7 @@ def try_pls_gpc_with_compression(use_compression):
                     print(f"    root shape    = {root_shape}")
 
         # Termination criterion
-        if solver_state.residual_norm <= 1e-5:
+        if solver_state.residual_norm <= 1e-4:
             print(f"\nTermination crit. fulfilled after {iters_counter} iterations\n")
             break
 
