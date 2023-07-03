@@ -7,7 +7,7 @@ from linear_operator.operators import LowRankRootLinearOperator
 from .test_probabilistic_linear_solver_gpc import get_testproblem
 
 
-def test_compression(top_k=None, kappa=None):
+def try_compression(top_k=None, kappa=None):
     """With this test function, we can play around with the parameters `top_k` and
     `kappa` and observe how the dummy inputs are compressed.
     """
@@ -30,7 +30,7 @@ def test_compression(top_k=None, kappa=None):
     print("eigvecs_new = \n", eigvecs_new)
 
 
-def test_pls_gpc_with_compression(use_compression=True):
+def try_pls_gpc_with_compression(use_compression):
     """Here, we apply the linear solver multiple times on the same test problem. All
     steps use information from the previous step (the actions and K times these
     actions). If `use_compression` is set to `True`, compression is used to keep the
@@ -96,10 +96,10 @@ def test_pls_gpc_with_compression(use_compression=True):
 
 
 if __name__ == "__main__":
-    test_compression(top_k=None, kappa=None)
-    test_compression(top_k=2, kappa=None)
-    test_compression(top_k=None, kappa=0.5)
-    test_compression(top_k=2, kappa=0.5)
+    try_compression(top_k=None, kappa=None)
+    try_compression(top_k=2, kappa=None)
+    try_compression(top_k=None, kappa=0.5)
+    try_compression(top_k=2, kappa=0.5)
 
-    test_pls_gpc_with_compression(use_compression=False)
-    test_pls_gpc_with_compression(use_compression=True)
+    try_pls_gpc_with_compression(use_compression=False)
+    try_pls_gpc_with_compression(use_compression=True)
