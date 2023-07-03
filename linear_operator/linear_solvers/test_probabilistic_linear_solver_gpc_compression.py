@@ -1,11 +1,10 @@
-from math import ceil
-
 import torch
-from test_probabilistic_linear_solver_gpc import get_testproblem
 
 from linear_operator.linear_solvers import PLS_GPC
 from linear_operator.linear_solvers.policies import GradientPolicy
 from linear_operator.operators import LowRankRootLinearOperator
+
+from .test_probabilistic_linear_solver_gpc import get_testproblem
 
 
 def test_compression(top_k=None, kappa=None):
@@ -31,7 +30,7 @@ def test_compression(top_k=None, kappa=None):
     print("eigvecs_new = \n", eigvecs_new)
 
 
-def test_pls_gpc_with_compression(use_compression):
+def test_pls_gpc_with_compression(use_compression=True):
     """Here, we apply the linear solver multiple times on the same test problem. All
     steps use information from the previous step (the actions and K times these
     actions). If `use_compression` is set to `True`, compression is used to keep the
