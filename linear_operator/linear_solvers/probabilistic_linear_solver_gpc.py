@@ -31,6 +31,39 @@ class PLS_GPC(LinearSolver):
         self.reltol = reltol
         self.max_iter = max_iter
 
+    @staticmethod
+    def compression(eigvals, eigvecs, top_k=None, kappa=None):
+        """`eigvals` and `eigvecs` define the eigendecomposition of some matrix (the
+        columns of `eigvecs` are assumed to contain the eigenvectors). We compress this
+        decomposition by only using the `top_k` largest eigenvalues and eigenvalues that
+        are above `kappa`.
+        """
+
+        # No compression
+        if top_k is None and kappa is None:
+            return eigvals, eigvecs
+
+        # Criterion 1: Only use the `top_k` eigenvalues
+        if top_k is not None:
+            top_k = min(eigvals.numel(), top_k)
+            topk_indices = torch.topk(eigvals, top_k).indices
+            indices_top_k = torch.zeros_like(eigvals, dtype=torch.bool)
+            indices_top_k[topk_indices] = True
+        else:
+            indices_top_k = torch.ones_like(eigvals, dtype=torch.bool)
+
+        # Criterion 2:  Only use eigenvalues above a threshold `kappa`
+        if kappa is not None:
+            indices_kappa = eigvals >= kappa
+        else:
+            indices_kappa = torch.ones_like(eigvals, dtype=torch.bool)
+
+        # Intersection of both criteria
+        indices = torch.logical_and(indices_top_k, indices_kappa)
+        assert torch.any(indices), "Compression: All indices are False."
+
+        return eigvals[indices], eigvecs[:, indices]
+
     def solve_iterator(
         self,
         K_op: LinearOperator,
@@ -40,6 +73,8 @@ class PLS_GPC(LinearSolver):
         x: Optional[Tensor] = None,
         actions: Optional[Tensor] = None,  # N x i tensor
         K_op_actions: Optional[Tensor] = None,  # N x i tensor
+        top_k: Optional[int] = None,
+        kappa: Optional[float] = None,
     ) -> Generator[LinearSolverState, None, None]:
         r"""Generator implementing the linear solver iteration.
 
@@ -78,8 +113,9 @@ class PLS_GPC(LinearSolver):
             # Compute `M`
             M = actions.T @ K_op_actions + actions.T @ (Winv_op @ actions)
 
-            # Compute its inverse via SVD (`M` is spd)
+            # Compute its inverse via SVD (`M` is spd), apply compression
             Lambda_diag, U = torch.linalg.eigh(M)
+            Lambda_diag, U = self.compression(Lambda_diag, U, top_k=top_k, kappa=kappa)
             Root = actions @ U @ torch.diag(torch.sqrt(1 / Lambda_diag))
             inverse_op = LowRankRootLinearOperator(Root)
 
