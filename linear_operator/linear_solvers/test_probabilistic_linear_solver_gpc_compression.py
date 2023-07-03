@@ -1,10 +1,9 @@
 import torch
+from test_probabilistic_linear_solver_gpc import get_testproblem
 
 from linear_operator.linear_solvers import PLS_GPC
 from linear_operator.linear_solvers.policies import GradientPolicy
 from linear_operator.operators import LowRankRootLinearOperator
-
-from .test_probabilistic_linear_solver_gpc import get_testproblem
 
 
 def try_compression(top_k=None, kappa=None):
@@ -96,10 +95,10 @@ def try_pls_gpc_with_compression(use_compression):
 
 
 if __name__ == "__main__":
-    try_compression(top_k=None, kappa=None)
-    try_compression(top_k=2, kappa=None)
-    try_compression(top_k=None, kappa=0.5)
-    try_compression(top_k=2, kappa=0.5)
+    # try_compression(top_k=None, kappa=None)
+    # try_compression(top_k=2, kappa=None)
+    # try_compression(top_k=None, kappa=0.5)
+    # try_compression(top_k=2, kappa=0.5)
 
-    try_pls_gpc_with_compression(use_compression=False)
+    # try_pls_gpc_with_compression(use_compression=False)
     try_pls_gpc_with_compression(use_compression=True)
