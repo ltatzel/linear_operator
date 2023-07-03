@@ -65,7 +65,7 @@ class PLS_GPC(LinearSolver):
         return eigvals[indices], eigvecs[:, indices]
 
     @staticmethod
-    def _init_solver_state(K_op, Winv_op, rhs, x, actions, K_op_actions, top_k, kappa):
+    def _init_solver_state(K_op, Winv_op, rhs, *, x, actions, K_op_actions, top_k, kappa):
         """
         Initialize and return the solver state. There are three cases:
         (1) `actions` and `K_op_actions` are given. Then, we construct `inverse_op` and
@@ -188,7 +188,9 @@ class PLS_GPC(LinearSolver):
         if x is not None:
             x = x.reshape(-1)
 
+        # ====================================
         # Initialize the solver state
+        # ====================================
         solver_state = self._init_solver_state(
             K_op,
             Winv_op,
@@ -199,9 +201,13 @@ class PLS_GPC(LinearSolver):
             top_k=top_k,
             kappa=kappa
         )
-        yield solver_state  # <-- Provide initial solver state
+        yield solver_state
 
         while True:
+            # ====================================
+            # Perform one solver iteration
+            # ====================================
+
             # Check convergence
             if (
                 solver_state.residual_norm
@@ -244,6 +250,10 @@ class PLS_GPC(LinearSolver):
                 """
                 warn(warn_msg)
                 break
+
+            # ====================================
+            # Update solver state
+            # ====================================
 
             # Update solution estimate
             step_size = observ / search_dir_sqnorm
