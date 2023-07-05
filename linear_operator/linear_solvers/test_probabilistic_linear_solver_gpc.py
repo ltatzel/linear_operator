@@ -82,8 +82,8 @@ def check_consistency(solver_state):
 
     if solver_state.cache["actions"] is not None:
         S_i = solver_state.cache["actions"]
-    C_i = S_i @ torch.linalg.solve(S_i.T @ lin_op @ S_i, S_i.T)
-    assert torch.allclose(C_i, solver_state.inverse_op.to_dense(), atol=1e-6)
+        C_i = S_i @ torch.linalg.solve(S_i.T @ lin_op @ S_i, S_i.T)
+        assert torch.allclose(C_i, solver_state.inverse_op.to_dense(), atol=1e-6)
 
 
 # Define test cases
@@ -178,7 +178,7 @@ def test_initial_state_of_preconditioned_solver(
     check_consistency(solver_state)
 
     if top_k is None and kappa is None:  # no compression
-        
+
         # Construct root of C_i by hand and compare to the one in `solver_state`
         eigenvals, U = torch.linalg.eigh(actions.T @ (K + Winv) @ actions)
         root = actions @ U @ torch.diag(torch.sqrt(1 / eigenvals))
@@ -189,10 +189,10 @@ def test_initial_state_of_preconditioned_solver(
         inverse_op = actions @ inverse_op_inner @ actions.T
         assert allclose(inverse_op, solver_state.inverse_op.to_dense())
 
-        # Check shape of actions after second run
-        num_actions_total = pre_solver_state.iteration + solver_state.iteration
-        assert solver_state.cache["actions"].shape[1] == num_actions_total
-        assert solver_state.cache["K_op_actions"].shape[1] == num_actions_total
+        # Check shape of actions
+        num_actions = pre_solver_state.iteration
+        assert solver_state.cache["actions"].shape[1] == num_actions
+        assert solver_state.cache["K_op_actions"].shape[1] == num_actions
 
 
 @pytest.mark.parametrize("seed", SEEDS, ids=SEEDS_IDS)
