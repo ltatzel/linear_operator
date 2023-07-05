@@ -31,6 +31,136 @@ class PLS_GPC(LinearSolver):
         self.reltol = reltol
         self.max_iter = max_iter
 
+    @staticmethod
+    def compression(eigvals, eigvecs, top_k=None, kappa=None):
+        """`eigvals` and `eigvecs` define the eigendecomposition of some matrix (the
+        columns of `eigvecs` are assumed to contain the eigenvectors). We compress this
+        decomposition by only using the `top_k` largest eigenvalues and eigenvalues that
+        are above `kappa`.
+        """
+
+        # No compression
+        if top_k is None and kappa is None:
+            return eigvals, eigvecs
+
+        # Criterion 1: Only use the `top_k` eigenvalues
+        if top_k is not None:
+            top_k = min(eigvals.numel(), top_k)
+            topk_indices = torch.topk(eigvals, top_k).indices
+            indices_top_k = torch.zeros_like(eigvals, dtype=torch.bool)
+            indices_top_k[topk_indices] = True
+        else:
+            indices_top_k = torch.ones_like(eigvals, dtype=torch.bool)
+
+        # Criterion 2:  Only use eigenvalues above a threshold `kappa`
+        if kappa is not None:
+            indices_kappa = eigvals >= kappa
+        else:
+            indices_kappa = torch.ones_like(eigvals, dtype=torch.bool)
+
+        # Intersection of both criteria
+        indices = torch.logical_and(indices_top_k, indices_kappa)
+        assert torch.any(indices), "Compression: All indices are False."
+
+        return eigvals[indices], eigvecs[:, indices]
+
+    @staticmethod
+    def _init_solver_state(K_op, Winv_op, rhs, *, x, actions, K_op_actions, top_k, kappa):
+        """
+        Initialize and return the solver state. There are three cases:
+        (1) `actions` and `K_op_actions` are given. Then, we construct `inverse_op` and
+            compute a consistent initial solution (i.e. `x` can not be used and must be
+            `None`).
+
+        If this is not the case, we dont' use preconditioning. Then, we have to
+        distinguish two sub-cases:
+        (2) `x` is not given. This is the "trivial" case, where the initial solution is
+            set to zero.
+        (3) `x` is given. In this case, a consistent rank 1 `inverse_op` is computed.
+        """
+
+        if (actions is not None) and (K_op_actions is not None):  # case 1
+            assert x is None
+
+            # Check dimensions of tensors
+            assert K_op_actions.shape == actions.shape  # both: N x i
+            assert K_op_actions.shape[0] == K_op.shape[0]
+
+            M = actions.T @ K_op_actions + actions.T @ (Winv_op @ actions)
+
+            # Compute its inverse via SVD (`M` is spd), apply compression
+            Lambda_diag, U = torch.linalg.eigh(M)
+            Lambda_diag, U = PLS_GPC.compression(
+                Lambda_diag, U, top_k=top_k, kappa=kappa
+            )
+            actions_U = actions @ U
+            Root = actions_U @ torch.diag(torch.sqrt(1 / Lambda_diag))
+            inverse_op = LowRankRootLinearOperator(Root)
+
+            # Compute consistent solution and residual
+            solution = inverse_op @ rhs
+            residual = rhs - (K_op + Winv_op) @ solution
+
+            # Modify `actions` and `K_op_actions` for consistency with `inverse_op`
+            if top_k is not None or kappa is not None:
+                actions = actions_U
+                K_op_actions = K_op_actions @ U
+
+        else:  # no preconditioning (cases 2 and 3)
+            assert (actions is None) and (K_op_actions is None)
+
+            if x is None:  # case 2
+
+                # "Trivial" initialization
+                inverse_op = ZeroLinearOperator(
+                    *K_op.shape, dtype=K_op.dtype, device=K_op.device
+                )
+                solution = torch.zeros_like(rhs)
+                residual = rhs
+
+            else:  # case 3
+
+                # Construct a better initial guess with a consistent inverse
+                # approximation such that x = inverse_op @ rhs
+                action = x
+                linear_op_action = (K_op + Winv_op) @ action
+                action_linear_op_action = torch.inner(linear_op_action, action)
+
+                # Potentially improved initial guess x derived from initial guess
+                step_size = torch.inner(action, rhs) / action_linear_op_action
+                solution = step_size * action
+
+                # Initial residual
+                linear_op_x = step_size * linear_op_action
+                residual = rhs - linear_op_x
+
+                # Consistent inverse approximation for new initial guess
+                Root = (action / torch.sqrt(action_linear_op_action))
+                Root = Root.reshape(-1, 1)
+                inverse_op = LowRankRootLinearOperator(Root)
+
+        # Initialize and return solver state
+        return LinearSolverState(
+            problem=LinearSystem(A=K_op + Winv_op, b=rhs),
+            solution=solution,
+            forward_op=None,
+            inverse_op=inverse_op,
+            residual=residual,
+            residual_norm=torch.linalg.vector_norm(residual, ord=2),
+            logdet=None,
+            iteration=0,
+            cache={
+                "search_dir_sq_Anorms": [],
+                "rhs_norm": torch.linalg.vector_norm(rhs, ord=2),
+                "action": None,
+                "observation": None,
+                "search_dir": None,
+                "step_size": None,
+                "actions": actions if actions is not None else None,
+                "K_op_actions": K_op_actions if K_op_actions is not None else None,
+            },
+        )
+
     def solve_iterator(
         self,
         K_op: LinearOperator,
@@ -40,6 +170,8 @@ class PLS_GPC(LinearSolver):
         x: Optional[Tensor] = None,
         actions: Optional[Tensor] = None,  # N x i tensor
         K_op_actions: Optional[Tensor] = None,  # N x i tensor
+        top_k: Optional[int] = None,
+        kappa: Optional[float] = None,
     ) -> Generator[LinearSolverState, None, None]:
         r"""Generator implementing the linear solver iteration.
 
@@ -62,86 +194,26 @@ class PLS_GPC(LinearSolver):
         if x is not None:
             x = x.reshape(-1)
 
-        # There are three cases: (1) `actions` and `K_op_actions` are given. Then, we
-        # construct `inverse_op` and compute a consistent initial solution (i.e. `x` can
-        # not be used and must be `None`). If this is not the case, we dont' use
-        # preconditioning. In this case, we have to distinguish two sub-cases: (2) `x`
-        # is not given and (3) `x` is given. These two cases were already implemented in
-        # `PLS` and are thus copied.
-        if (actions is not None) and (K_op_actions is not None):  # case (1)
-            assert x is None
-
-            # Check dimensions of tensors
-            assert K_op_actions.shape == actions.shape  # both: N x i
-            assert K_op_actions.shape[0] == K_op.shape[0]
-
-            # Compute `M`
-            M = actions.T @ K_op_actions + actions.T @ (Winv_op @ actions)
-
-            # Compute its inverse via SVD (`M` is spd)
-            Lambda_diag, U = torch.linalg.eigh(M)
-            Root = actions @ U @ torch.diag(torch.sqrt(1 / Lambda_diag))
-            inverse_op = LowRankRootLinearOperator(Root)
-
-            # Compute consistent solution and residual
-            solution = inverse_op @ rhs
-            residual = rhs - (K_op + Winv_op) @ solution
-        else:
-            assert (actions is None) and (K_op_actions is None)
-
-            if x is None:  # case (2)
-                # "Trivial" initialization
-                inverse_op = ZeroLinearOperator(
-                    *K_op.shape, dtype=K_op.dtype, device=K_op.device
-                )
-                solution = torch.zeros_like(rhs)
-                residual = rhs
-
-            else:  # case (3)
-                # Construct a better initial guess with a consistent inverse
-                # approximation such that x = inverse_op @ rhs
-                action = x
-                linear_op_action = (K_op + Winv_op) @ action
-                action_linear_op_action = torch.inner(linear_op_action, action)
-
-                # Potentially improved initial guess x derived from initial guess
-                step_size = torch.inner(action, rhs) / action_linear_op_action
-                solution = step_size * action
-
-                # Initial residual
-                linear_op_x = step_size * linear_op_action
-                residual = rhs - linear_op_x
-
-                # Consistent inverse approximation for new initial guess
-                Root = (action / torch.sqrt(action_linear_op_action))
-                Root = Root.reshape(-1, 1)
-                inverse_op = LowRankRootLinearOperator(Root)
-
-        # Initialize solver state
-        solver_state = LinearSolverState(
-            problem=LinearSystem(A=K_op + Winv_op, b=rhs),
-            solution=solution,
-            forward_op=None,
-            inverse_op=inverse_op,
-            residual=residual,
-            residual_norm=torch.linalg.vector_norm(residual, ord=2),
-            logdet=None,
-            iteration=0,
-            cache={
-                "search_dir_sq_Anorms": [],
-                "rhs_norm": torch.linalg.vector_norm(rhs, ord=2),
-                "action": None,
-                "observation": None,
-                "search_dir": None,
-                "step_size": None,
-                "actions": actions if actions is not None else None,
-                "K_op_actions": K_op_actions if K_op_actions is not None else None,
-            },
+        # ====================================
+        # Initialize the solver state
+        # ====================================
+        solver_state = self._init_solver_state(
+            K_op,
+            Winv_op,
+            rhs,
+            x=x,
+            actions=actions,
+            K_op_actions=K_op_actions,
+            top_k=top_k,
+            kappa=kappa
         )
-
         yield solver_state
 
         while True:
+            # ====================================
+            # Perform one solver iteration
+            # ====================================
+
             # Check convergence
             if (
                 solver_state.residual_norm
@@ -185,23 +257,22 @@ class PLS_GPC(LinearSolver):
                 warn(warn_msg)
                 break
 
+            # ====================================
+            # Update solver state
+            # ====================================
+
             # Update solution estimate
             step_size = observ / search_dir_sqnorm
             solver_state.solution = solver_state.solution + step_size * search_dir
 
             # Update inverse approximation
+            root_col = (search_dir / torch.sqrt(search_dir_sqnorm)).reshape(-1, 1)
             if isinstance(solver_state.inverse_op, ZeroLinearOperator):
-                solver_state.inverse_op = LowRankRootLinearOperator(
-                    (search_dir / torch.sqrt(search_dir_sqnorm)).reshape(-1, 1)
-                )
+                solver_state.inverse_op = LowRankRootLinearOperator(root_col)
             else:
                 solver_state.inverse_op = LowRankRootLinearOperator(
                     torch.concat(
-                        (
-                            solver_state.inverse_op.root.to_dense(),
-                            (search_dir / torch.sqrt(search_dir_sqnorm)).reshape(-1, 1),
-                        ),
-                        dim=1,
+                        (solver_state.inverse_op.root.to_dense(), root_col), dim=1
                     )
                 )
 
