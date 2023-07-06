@@ -94,7 +94,12 @@ class PLS_GPC(LinearSolver):
                 Lambda_diag, U, top_k=top_k, kappa=kappa
             )
             if Lambda_diag.min() < 0.0:
-                warn("Lambda_diag has negative entries (after compression).")
+                warn_msg = """
+                `Lambda_diag` has negative entries (after compression). This leads to a
+                `Root` with `nan`s. It is recommended to use compression with a small
+                positive constant `kappa`.
+                """
+                warn(warn_msg)
 
             actions_U = actions @ U
             Root = actions_U @ torch.diag(torch.sqrt(1 / Lambda_diag))
