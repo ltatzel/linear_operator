@@ -93,6 +93,9 @@ class PLS_GPC(LinearSolver):
             Lambda_diag, U = PLS_GPC.compression(
                 Lambda_diag, U, top_k=top_k, kappa=kappa
             )
+            if Lambda_diag.min() < 0.0:
+                warn("Lambda_diag has negative entries (after compression).")
+
             actions_U = actions @ U
             Root = actions_U @ torch.diag(torch.sqrt(1 / Lambda_diag))
             inverse_op = LowRankRootLinearOperator(Root)
