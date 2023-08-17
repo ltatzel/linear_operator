@@ -93,7 +93,7 @@ class PLS_GPC(LinearSolver):
             # Compute its inverse via SVD (`M` is spd), apply compression
             Lambda_diag, U = torch.linalg.eigh(M)
             k_old = len(Lambda_diag)
-            
+
             # Apply compression
             Lambda_diag, U = PLS_GPC.compression(
                 Lambda_diag, U, top_k=top_k, kappa=kappa
@@ -125,8 +125,7 @@ class PLS_GPC(LinearSolver):
         else:  # no preconditioning (cases 2 and 3)
             assert (actions is None) and (K_op_actions is None)
 
-            # =============== DEBUGGING ===============
-            M = None  # also gets stored in solver state's cache
+            M = None  # Only relevant for compression (case 1)
 
             if x is None:  # case 2
 
@@ -175,9 +174,9 @@ class PLS_GPC(LinearSolver):
                 "observation": None,
                 "search_dir": None,
                 "step_size": None,
-                "actions": actions if actions is not None else None,
-                "K_op_actions": K_op_actions if K_op_actions is not None else None,
-                "M": M,  # =============== DEBUGGING ===============
+                "actions": actions,
+                "K_op_actions": K_op_actions,
+                "M": M,
             },
         )
 
