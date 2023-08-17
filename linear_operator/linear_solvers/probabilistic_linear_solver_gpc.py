@@ -65,7 +65,9 @@ class PLS_GPC(LinearSolver):
         return eigvals[indices], eigvecs[:, indices]
 
     @staticmethod
-    def _init_solver_state(K_op, Winv_op, rhs, *, x, actions, K_op_actions, top_k, kappa):
+    def _init_solver_state(
+        K_op, Winv_op, rhs, *, x, actions, K_op_actions, top_k, kappa
+    ):
         """
         Initialize and return the solver state. There are three cases:
         (1) `actions` and `K_op_actions` are given. Then, we construct `inverse_op` and
@@ -90,24 +92,14 @@ class PLS_GPC(LinearSolver):
 
             # Compute its inverse via SVD (`M` is spd), apply compression
             Lambda_diag, U = torch.linalg.eigh(M)
-            
-            # =============== DEBUGGING ===============
             k_old = len(Lambda_diag)
-            print("\n  BEFORE Compression")
-            print("     Lambda_diag = ", Lambda_diag)
-            print("     U.shape =", U.shape)
-            print("     actions.shape = ", actions.shape)
-            print("     K_op_actions.shape = ", K_op_actions.shape)
-
+            
+            # Apply compression
             Lambda_diag, U = PLS_GPC.compression(
                 Lambda_diag, U, top_k=top_k, kappa=kappa
             )
-
-            # =============== DEBUGGING ===============
             k_new = len(Lambda_diag)
-            print("  AFTER Compression")
-            print("     Lambda_diag = ", Lambda_diag)
-            print("     U.shape =", U.shape)
+            # print(f"  Compression from k = {k_old} to k = {k_new}")
 
             if Lambda_diag.min() < 0.0:
                 warn_msg = """
@@ -126,18 +118,9 @@ class PLS_GPC(LinearSolver):
             residual = rhs - (K_op + Winv_op) @ solution
 
             # Modify `actions` and `K_op_actions` for consistency with `inverse_op`
-            if k_new < k_old:  # and (top_k is not None or kappa is not None)
-
-                # =============== DEBUGGING ===============
-                print("     Updating actions and K_op_actions")
-
+            if k_new < k_old:
                 actions = actions_U
                 K_op_actions = K_op_actions @ U
-
-            # =============== DEBUGGING ===============
-            print("     actions.shape = ", actions.shape)
-            print("     K_op_actions.shape = ", K_op_actions.shape)
-            print(f"  COMPRESSION from k_old = {k_old} --> k_new = {k_new}\n")
 
         else:  # no preconditioning (cases 2 and 3)
             assert (actions is None) and (K_op_actions is None)

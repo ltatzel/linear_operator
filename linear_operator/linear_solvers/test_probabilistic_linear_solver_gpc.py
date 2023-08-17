@@ -83,7 +83,7 @@ def check_consistency(solver_state):
     if solver_state.cache["actions"] is not None:
         S_i = solver_state.cache["actions"]
         C_i = S_i @ torch.linalg.solve(S_i.T @ lin_op @ S_i, S_i.T)
-        assert torch.allclose(C_i, solver_state.inverse_op.to_dense(), atol=1e-6)
+        assert allclose(C_i, solver_state.inverse_op.to_dense())
 
 
 # Define test cases
