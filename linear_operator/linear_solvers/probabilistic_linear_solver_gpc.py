@@ -65,7 +65,9 @@ class PLS_GPC(LinearSolver):
         return eigvals[indices], eigvecs[:, indices]
 
     @staticmethod
-    def _init_solver_state(K_op, Winv_op, rhs, *, x, actions, K_op_actions, top_k, kappa):
+    def _init_solver_state(
+        K_op, Winv_op, rhs, *, x, actions, K_op_actions, top_k, kappa
+    ):
         """
         Initialize and return the solver state. There are three cases:
         (1) `actions` and `K_op_actions` are given. Then, we construct `inverse_op` and
@@ -90,9 +92,15 @@ class PLS_GPC(LinearSolver):
 
             # Compute its inverse via SVD (`M` is spd), apply compression
             Lambda_diag, U = torch.linalg.eigh(M)
+            k_old = len(Lambda_diag)
+
+            # Apply compression
             Lambda_diag, U = PLS_GPC.compression(
                 Lambda_diag, U, top_k=top_k, kappa=kappa
             )
+            k_new = len(Lambda_diag)
+            # print(f"  Compression from k = {k_old} to k = {k_new}")
+
             if Lambda_diag.min() < 0.0:
                 warn_msg = """
                 `Lambda_diag` has negative entries (after compression). This leads to a
@@ -110,12 +118,14 @@ class PLS_GPC(LinearSolver):
             residual = rhs - (K_op + Winv_op) @ solution
 
             # Modify `actions` and `K_op_actions` for consistency with `inverse_op`
-            if top_k is not None or kappa is not None:
+            if k_new < k_old:
                 actions = actions_U
                 K_op_actions = K_op_actions @ U
 
         else:  # no preconditioning (cases 2 and 3)
             assert (actions is None) and (K_op_actions is None)
+
+            M = None  # Only relevant for compression (case 1)
 
             if x is None:  # case 2
 
@@ -164,8 +174,9 @@ class PLS_GPC(LinearSolver):
                 "observation": None,
                 "search_dir": None,
                 "step_size": None,
-                "actions": actions if actions is not None else None,
-                "K_op_actions": K_op_actions if K_op_actions is not None else None,
+                "actions": actions,
+                "K_op_actions": K_op_actions,
+                "M": M,
             },
         )
 
