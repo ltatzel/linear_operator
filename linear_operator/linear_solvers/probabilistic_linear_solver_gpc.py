@@ -88,7 +88,7 @@ class PLS_GPC(LinearSolver):
             assert K_op_actions.shape == actions.shape  # both: N x i
             assert K_op_actions.shape[0] == K_op.shape[0]
 
-            M = actions.T @ K_op_actions + actions.T @ (Winv_op @ actions)
+            M = actions.T @ (K_op_actions + (Winv_op @ actions))
 
             # Compute its inverse via SVD (`M` is spd), apply compression
             Lambda_diag, U = torch.linalg.eigh(M)
