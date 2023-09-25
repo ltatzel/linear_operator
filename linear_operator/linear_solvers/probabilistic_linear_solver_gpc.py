@@ -91,10 +91,26 @@ class PLS_GPC(LinearSolver):
             M = actions.T @ (K_op_actions + (Winv_op @ actions))
 
             # Compute its inverse via SVD (`M` is spd), apply compression
-            Lambda_diag, U = torch.linalg.eigh(M)
-            k_old = len(Lambda_diag)
+            try:
+                Lambda_diag, U = torch.linalg.eigh(M)
+            except Exception as e:
+
+                def is_nan_or_inf(input):
+                    """Check if `input` contains any `inf` or `nan`."""
+                    is_nan = torch.any(torch.isnan(input))
+                    is_inf = torch.any(torch.isinf(input))
+                    return is_nan or is_inf
+
+                print("\nComputing the eigendecompositiuon of M failed.")
+                print("M = \n", M)
+                print("\nis_nan_or_inf(...)")
+                print("   actions        :", is_nan_or_inf(actions))
+                print("   K @ actions    :", is_nan_or_inf(K_op_actions))
+                print("   Winv @ actions :", is_nan_or_inf(Winv_op @ actions))
+                raise e
 
             # Apply compression
+            k_old = len(Lambda_diag)
             Lambda_diag, U = PLS_GPC.compression(
                 Lambda_diag, U, top_k=top_k, kappa=kappa
             )
