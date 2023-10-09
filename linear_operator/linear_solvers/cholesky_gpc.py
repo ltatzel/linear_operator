@@ -142,7 +142,7 @@ class Cholesky_GPC(LinearSolver):
                 residual=residual,
                 residual_norm=torch.linalg.vector_norm(residual, ord=2),
                 logdet=None,
-                iteration=0,
+                iteration=K_op.shape[0],
                 cache={
                     "search_dir_sq_Anorms": [],
                     "rhs_norm": torch.linalg.vector_norm(rhs, ord=2),
