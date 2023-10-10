@@ -133,6 +133,9 @@ class Cholesky_GPC(LinearSolver):
             if x is not None:
                 x = x.reshape(-1)
 
+            # The actual problem would take a lot of extra GPU memory
+            dummy_problem = LinearSystem(A=torch.Tensor([]), b=torch.Tensor([]))
+
             # ==========================================================================
             # Initial solver state
             # ==========================================================================
@@ -141,7 +144,7 @@ class Cholesky_GPC(LinearSolver):
                 *K_op.shape, dtype=K_op.dtype, device=K_op.device
             )
             solver_state = LinearSolverState(
-                problem=LinearSystem(A=K_op + Winv_op, b=rhs),
+                problem=dummy_problem,  # unused and takes a lot of memory
                 solution=torch.zeros_like(rhs),
                 forward_op=None,
                 inverse_op=inverse_op,
@@ -178,7 +181,7 @@ class Cholesky_GPC(LinearSolver):
 
             # Create solver state
             solver_state = LinearSolverState(
-                problem=LinearSystem(A=K_op + Winv_op, b=rhs),
+                problem=dummy_problem,  # unused and takes a lot of memory
                 solution=solution,
                 forward_op=None,
                 inverse_op=inverse_op,
@@ -195,7 +198,7 @@ class Cholesky_GPC(LinearSolver):
                     "step_size": None,
                     "actions": None,  # TODO: Could add these if needed downstream.
                     "K_op_actions": None,
-                    "M": K_Winv_dense,
+                    "M": None,
                 },
             )
 

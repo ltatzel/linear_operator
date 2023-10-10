@@ -144,7 +144,6 @@ class PLS_GPC(LinearSolver):
             M = None  # Only relevant for compression (case 1)
 
             if x is None:  # case 2
-
                 # "Trivial" initialization
                 inverse_op = ZeroLinearOperator(
                     *K_op.shape, dtype=K_op.dtype, device=K_op.device
@@ -153,7 +152,6 @@ class PLS_GPC(LinearSolver):
                 residual = rhs
 
             else:  # case 3
-
                 # Construct a better initial guess with a consistent inverse
                 # approximation such that x = inverse_op @ rhs
                 action = x
@@ -169,13 +167,16 @@ class PLS_GPC(LinearSolver):
                 residual = rhs - linear_op_x
 
                 # Consistent inverse approximation for new initial guess
-                Root = (action / torch.sqrt(action_linear_op_action))
+                Root = action / torch.sqrt(action_linear_op_action)
                 Root = Root.reshape(-1, 1)
                 inverse_op = LowRankRootLinearOperator(Root)
 
+        # The actual problem would take a lot of extra GPU memory
+        dummy_problem = LinearSystem(A=torch.Tensor([]), b=torch.Tensor([]))
+
         # Initialize and return solver state
         return LinearSolverState(
-            problem=LinearSystem(A=K_op + Winv_op, b=rhs),
+            problem=dummy_problem,
             solution=solution,
             forward_op=None,
             inverse_op=inverse_op,
@@ -240,7 +241,7 @@ class PLS_GPC(LinearSolver):
             actions=actions,
             K_op_actions=K_op_actions,
             top_k=top_k,
-            kappa=kappa
+            kappa=kappa,
         )
         yield solver_state
 
@@ -298,21 +299,28 @@ class PLS_GPC(LinearSolver):
 
             # Update solution estimate
             step_size = observ / search_dir_sqnorm
-            solver_state.solution = solver_state.solution + step_size * search_dir
+            solver_state.solution = (
+                solver_state.solution + step_size * search_dir
+            )
 
             # Update inverse approximation
-            root_col = (search_dir / torch.sqrt(search_dir_sqnorm)).reshape(-1, 1)
+            root_col = (search_dir / torch.sqrt(search_dir_sqnorm)).reshape(
+                -1, 1
+            )
             if isinstance(solver_state.inverse_op, ZeroLinearOperator):
                 solver_state.inverse_op = LowRankRootLinearOperator(root_col)
             else:
                 solver_state.inverse_op = LowRankRootLinearOperator(
                     torch.concat(
-                        (solver_state.inverse_op.root.to_dense(), root_col), dim=1
+                        (solver_state.inverse_op.root.to_dense(), root_col),
+                        dim=1,
                     )
                 )
 
             # Update residual
-            solver_state.residual = rhs - (K_op + Winv_op) @ solver_state.solution
+            solver_state.residual = (
+                rhs - (K_op + Winv_op) @ solver_state.solution
+            )
             solver_state.residual_norm = torch.linalg.vector_norm(
                 solver_state.residual, ord=2
             )
@@ -339,7 +347,10 @@ class PLS_GPC(LinearSolver):
                 solver_state.cache["K_op_actions"] = K_op_action.reshape(-1, 1)
             else:
                 solver_state.cache["K_op_actions"] = torch.hstack(
-                    (solver_state.cache["K_op_actions"], K_op_action.reshape(-1, 1))
+                    (
+                        solver_state.cache["K_op_actions"],
+                        K_op_action.reshape(-1, 1),
+                    )
                 )
 
             yield solver_state
