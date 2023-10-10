@@ -8,8 +8,7 @@ from torch import Tensor, Size
 
 from linear_operator.operators import LinearOperator
 
-from .. import settings, utils
-from ..operators import LinearOperator, LowRankRootLinearOperator, RootLinearOperator
+from ..operators import LinearOperator, ZeroLinearOperator
 from .linear_solver import LinearSolver, LinearSolverState, LinearSystem
 
 
@@ -18,7 +17,7 @@ class _CholeskyFactorInverseLinearOperator(LinearOperator):
         self,
         cholfac: Tensor,
         upper: bool = False,
-        linear_solver: Any | None = None,
+        linear_solver: Any or None = None,
         **kwargs,
     ):
         super().__init__(cholfac, linear_solver=linear_solver, **kwargs)
@@ -27,7 +26,7 @@ class _CholeskyFactorInverseLinearOperator(LinearOperator):
 
     def _matmul(self, rhs: Tensor) -> Tensor:
         return torch.linalg.solve_triangular(
-            self.cholfac, rhs, upper=self.upper, left=True
+            self.cholfac.T, rhs, upper=not self.upper, left=True
         )
 
     def _size(self) -> Size:
@@ -115,7 +114,9 @@ class Cholesky_GPC(LinearSolver):
             raise ValueError(
                 "Cannot use initial estimate of solution for Cholesky. Set `x=None` instead."
             )
+        
         with torch.no_grad():
+
             # Dense matrix
             K_Winv_dense = K_op.to_dense() + Winv_op.to_dense()
 
@@ -123,6 +124,40 @@ class Cholesky_GPC(LinearSolver):
             rhs = rhs.reshape(-1)
             if x is not None:
                 x = x.reshape(-1)
+        
+            # ==========================================================================
+            # Initial solver state
+            # ==========================================================================
+            
+            inverse_op = ZeroLinearOperator(
+                *K_op.shape, dtype=K_op.dtype, device=K_op.device
+            )
+            solver_state = LinearSolverState(
+                problem=LinearSystem(A=K_op + Winv_op, b=rhs),
+                solution=torch.zeros_like(rhs),
+                forward_op=None,
+                inverse_op=inverse_op,
+                residual=rhs,
+                residual_norm=torch.linalg.vector_norm(rhs, ord=2),
+                logdet=None,
+                iteration=0,
+                cache={
+                    "search_dir_sq_Anorms": [],
+                    "rhs_norm": torch.linalg.vector_norm(rhs, ord=2),
+                    "action": None,
+                    "observation": None,
+                    "search_dir": None,
+                    "step_size": None,
+                    "actions": None,
+                    "K_op_actions": None,
+                    "M": None,
+                },
+            )
+            yield solver_state
+
+            # ==========================================================================
+            # Final solver state
+            # ==========================================================================
 
             # Inverse operator v -> (K+W^{-1})^{-1}v
             inverse_op = CholeskySolveLinearOperator(K_Winv_dense)
