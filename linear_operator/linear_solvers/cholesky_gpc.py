@@ -16,24 +16,31 @@ class _CholeskyFactorInverseLinearOperator(LinearOperator):
     def __init__(
         self,
         cholfac: Tensor,
-        upper: bool = False,
+        is_upper_cholfac: bool = False,
         linear_solver: Any or None = None,
         **kwargs,
     ):
-        super().__init__(cholfac, linear_solver=linear_solver, **kwargs)
+        super().__init__(
+            cholfac,
+            is_upper_cholfac=is_upper_cholfac,
+            linear_solver=linear_solver,
+            **kwargs,
+        )
         self.cholfac = cholfac
-        self.upper = upper
+        self.is_upper_cholfac = is_upper_cholfac
 
     def _matmul(self, rhs: Tensor) -> Tensor:
         return torch.linalg.solve_triangular(
-            self.cholfac.T, rhs, upper=not self.upper, left=True
+            self.cholfac.T, rhs, upper=not self.is_upper_cholfac, left=True
         )
 
     def _size(self) -> Size:
         return self.cholfac.size()
 
     def _transpose_nonbatch(self) -> LinearOperator:
-        return _CholeskyFactorInverseLinearOperator(cholfac=self.cholfac.T)
+        return _CholeskyFactorInverseLinearOperator(
+            cholfac=self.cholfac.T, is_upper_cholfac=not self.is_upper_cholfac
+        )
 
 
 class CholeskySolveLinearOperator(LinearOperator):
@@ -54,7 +61,9 @@ class CholeskySolveLinearOperator(LinearOperator):
 
         # Cholesky decomposition
         self.cholfac = torch.linalg.cholesky(self.a, upper=False)
-        self.root = _CholeskyFactorInverseLinearOperator(self.cholfac, upper=False)
+        self.root = _CholeskyFactorInverseLinearOperator(
+            self.cholfac, is_upper_cholfac=False
+        )
 
         super().__init__(
             a,
@@ -114,9 +123,8 @@ class Cholesky_GPC(LinearSolver):
             raise ValueError(
                 "Cannot use initial estimate of solution for Cholesky. Set `x=None` instead."
             )
-        
-        with torch.no_grad():
 
+        with torch.no_grad():
             # Dense matrix
             K_Winv_dense = K_op.to_dense() + Winv_op.to_dense()
 
@@ -124,11 +132,11 @@ class Cholesky_GPC(LinearSolver):
             rhs = rhs.reshape(-1)
             if x is not None:
                 x = x.reshape(-1)
-        
+
             # ==========================================================================
             # Initial solver state
             # ==========================================================================
-            
+
             inverse_op = ZeroLinearOperator(
                 *K_op.shape, dtype=K_op.dtype, device=K_op.device
             )
