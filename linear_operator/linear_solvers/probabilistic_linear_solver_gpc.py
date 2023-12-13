@@ -60,7 +60,8 @@ class PLS_GPC(LinearSolver):
 
         # Intersection of both criteria
         indices = torch.logical_and(indices_top_k, indices_kappa)
-        assert torch.any(indices), "Compression: All indices are False."
+        err_msg = f"Compression: All indices are False. eigvals = {eigvals}."
+        assert torch.any(indices), err_msg
 
         return eigvals[indices], eigvecs[:, indices]
 
